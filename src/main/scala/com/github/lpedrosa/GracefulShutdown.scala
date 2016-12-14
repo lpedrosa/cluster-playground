@@ -11,7 +11,7 @@ object Guardian {
   case class Create(id: String) extends Serializable
 
   @SerialVersionUID(1L)
-  case object FailedInitialization extends Serializable
+  case object NotInitialized extends Serializable
 
 }
 
@@ -22,12 +22,11 @@ class Guardian extends Actor with ActorLogging {
   import Guardian._
 
   def receive = {
-    case Create(id) => {
+    case Create(id) =>
       val conversation = context.actorOf(Conversation.props(id))
       context.become(started(conversation))
-    }
 
-    case _ => sender ! FailedInitialization
+    case _ => sender ! NotInitialized
   }
 
   def started(conversation: ActorRef): Receive = {
@@ -57,14 +56,13 @@ class Conversation(id: String) extends Actor with ActorLogging {
   val members = Set.empty[String]
 
   def receive = {
-    case AddMember(memberId) => { 
+    case AddMember(memberId) =>
       log.info("Adding member with id: {}", memberId)
       members += memberId
-    }
-    case RemoveMember(memberId) => {
+    
+    case RemoveMember(memberId) =>
       log.info("Removing member with id: {}", memberId)
       members -= memberId
-    }
   }
 
 }
