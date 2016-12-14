@@ -1,11 +1,13 @@
 package com.github.lpedrosa
 
-import akka.actor._
+import scala.concurrent.Await
+import scala.concurrent.duration._
 
+import akka.actor.{Actor, ActorRef, ActorLogging, ActorSystem, Props}
+import akka.cluster.sharding.{ClusterSharding, ClusterShardingSettings, ShardRegion}
+import akka.util.Timeout
 
 object Guardian {
-
-  import Conversation._
 
   @SerialVersionUID(1L)
   case class Create(id: String) extends Serializable
@@ -14,7 +16,6 @@ object Guardian {
   case object NotInitialized extends Serializable
 
 }
-
 
 class Guardian extends Actor with ActorLogging {
 
@@ -25,7 +26,6 @@ class Guardian extends Actor with ActorLogging {
     case Create(id) =>
       val conversation = context.actorOf(Conversation.props(id))
       context.become(started(conversation))
-
     case _ => sender ! NotInitialized
   }
 
@@ -42,6 +42,10 @@ object Conversation {
   sealed trait ConversationMessage extends Serializable
 
   @SerialVersionUID(1L)
+  case class ConversationEnvelope(id: String, payload: ConversationMessage) 
+    extends Serializable
+
+  @SerialVersionUID(1L)
   case class AddMember(memberId: String) extends ConversationMessage
   @SerialVersionUID(1L)
   case class RemoveMember(memberId: String) extends ConversationMessage
@@ -50,16 +54,14 @@ object Conversation {
 
 class Conversation(id: String) extends Actor with ActorLogging {
 
-  import scala.collection.mutable.Set
   import Conversation._
 
-  val members = Set.empty[String]
+  val members = scala.collection.mutable.Set.empty[String]
 
   def receive = {
     case AddMember(memberId) =>
       log.info("Adding member with id: {}", memberId)
       members += memberId
-    
     case RemoveMember(memberId) =>
       log.info("Removing member with id: {}", memberId)
       members -= memberId
@@ -69,19 +71,38 @@ class Conversation(id: String) extends Actor with ActorLogging {
 
 object GracefulShutdown extends App {
 
-  import akka.util.Timeout
+  import Conversation._
+  import Guardian._
 
-  import scala.concurrent.Await
-  import scala.concurrent.duration._
-
-
-  // default timeout
-  val timeout = Timeout(2.seconds)
-  
   val system = ActorSystem("graceful")
+  
+  val entityExtractor: ShardRegion.ExtractEntityId = {
+    case ConversationEnvelope(id, payload) => (id.toString, payload)
+    case m @ Create(id) => (id.toString, m)
+  }
+
+  private def hashToShard(hash: String, numberOfShards: Int) = {
+    (hash.codePointAt(hash.length() - 1) % numberOfShards).toString
+  }
+
+  val numberOfShards = 4
+
+  val shardExtractor: ShardRegion.ExtractShardId = {
+    case ConversationEnvelope(id, payload) => hashToShard(id, numberOfShards)
+    case Create(id) => hashToShard(id, numberOfShards)
+  }
+
+  val region: ActorRef = ClusterSharding(system).start(
+    typeName = "Conversation",
+    entityProps = Props[Guardian],
+    settings = ClusterShardingSettings(system),
+    extractEntityId = entityExtractor,
+    extractShardId = shardExtractor)
 
   // do some stuff
 
+  // default timeout
+  val timeout = Timeout(2.seconds)
   val hasTerminated = system.terminate()
   Await.result(hasTerminated, timeout.duration)
 
