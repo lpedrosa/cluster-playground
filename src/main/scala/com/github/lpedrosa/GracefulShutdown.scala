@@ -3,19 +3,44 @@ package com.github.lpedrosa
 import akka.actor._
 
 
-object GuardianAction {
+object Guardian {
+
+  import Conversation._
 
   @SerialVersionUID(1L)
   case class Create(id: String) extends Serializable
+
   @SerialVersionUID(1L)
-  case class ConversationEnvelope(id: String, msg: ConversationMessage) 
-    extends Serializable
+  case object FailedInitialization extends Serializable
+
 }
 
 
-trait ConversationMessage extends Serializable
+class Guardian extends Actor with ActorLogging {
 
-object ConversationAction {
+  import Conversation._
+  import Guardian._
+
+  def receive = {
+    case Create(id) => {
+      val conversation = context.actorOf(Conversation.props(id))
+      context.become(started(conversation))
+    }
+
+    case _ => sender ! FailedInitialization
+  }
+
+  def started(conversation: ActorRef): Receive = {
+    case m: ConversationMessage => conversation.forward(m)
+  }
+
+}
+
+object Conversation {
+
+  def props(id: String): Props = Props(new Conversation(id))
+
+  sealed trait ConversationMessage extends Serializable
 
   @SerialVersionUID(1L)
   case class AddMember(memberId: String) extends ConversationMessage
@@ -24,20 +49,12 @@ object ConversationAction {
 
 }
 
-
-object Conversation {
-
-  def props(id: String): Props = Props(new Conversation(id))
-
-}
-
 class Conversation(id: String) extends Actor with ActorLogging {
 
-  import scala.collection.mutable
+  import scala.collection.mutable.Set
+  import Conversation._
 
-  import ConversationAction._
-
-  val members = mutable.Set.empty[String]
+  val members = Set.empty[String]
 
   def receive = {
     case AddMember(memberId) => { 
@@ -61,7 +78,7 @@ object GracefulShutdown extends App {
 
 
   // default timeout
-  val timeout = Timeout(2 seconds)
+  val timeout = Timeout(2.seconds)
   
   val system = ActorSystem("graceful")
 
