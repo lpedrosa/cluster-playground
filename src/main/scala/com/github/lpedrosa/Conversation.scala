@@ -1,11 +1,6 @@
 package com.github.lpedrosa
 
-import scala.concurrent.Await
-import scala.concurrent.duration._
-
 import akka.actor.{Actor, ActorRef, ActorLogging, ActorSystem, Props}
-import akka.cluster.sharding.{ClusterSharding, ClusterShardingSettings, ShardRegion}
-import akka.util.Timeout
 
 object Guardian {
 
@@ -69,41 +64,3 @@ class Conversation(id: String) extends Actor with ActorLogging {
 
 }
 
-object GracefulShutdown extends App {
-
-  import Conversation._
-  import Guardian._
-
-  val system = ActorSystem("graceful")
-  
-  val entityExtractor: ShardRegion.ExtractEntityId = {
-    case ConversationEnvelope(id, payload) => (id.toString, payload)
-    case m @ Create(id) => (id.toString, m)
-  }
-
-  private def hashToShard(hash: String, numberOfShards: Int) = {
-    (hash.codePointAt(hash.length() - 1) % numberOfShards).toString
-  }
-
-  val numberOfShards = 4
-
-  val shardExtractor: ShardRegion.ExtractShardId = {
-    case ConversationEnvelope(id, payload) => hashToShard(id, numberOfShards)
-    case Create(id) => hashToShard(id, numberOfShards)
-  }
-
-  val region: ActorRef = ClusterSharding(system).start(
-    typeName = "Conversation",
-    entityProps = Props[Guardian],
-    settings = ClusterShardingSettings(system),
-    extractEntityId = entityExtractor,
-    extractShardId = shardExtractor)
-
-  // do some stuff
-
-  // default timeout
-  val timeout = Timeout(2.seconds)
-  val hasTerminated = system.terminate()
-  Await.result(hasTerminated, timeout.duration)
-
-}
