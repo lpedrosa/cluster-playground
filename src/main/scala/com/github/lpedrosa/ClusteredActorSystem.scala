@@ -1,18 +1,21 @@
 package com.github.lpedrosa
 
 import scala.collection.JavaConverters._ 
-import scala.collection.immutable.{List, Map, Set}
+import scala.collection.immutable
 
-import akka.actor.{ActorRef, ActorSystem, Address, Props}
+import akka.actor.{ActorRef, ActorSystem, Address, PoisonPill, Props}
 import akka.cluster.Cluster
-import akka.cluster.sharding.{ClusterSharding, ClusterShardingSettings, ShardRegion}
+import akka.cluster.sharding.ClusterSharding
+import akka.cluster.sharding.ClusterShardingSettings
+import akka.cluster.sharding.ShardCoordinator.ShardAllocationStrategy
+import akka.cluster.sharding.ShardRegion
 import com.typesafe.config.{Config, ConfigFactory}
 import org.slf4j.LoggerFactory
 
 case class ClusterConfig(systemName: String, host: String, port: Int) {
 
   lazy val toConfig: Config = {
-    val settings = Map(
+    val settings = immutable.Map(
       "akka.actor.provider" -> "cluster",
       "akka.remote.log-lifecycle-events" -> "off",
       "akka.remote.netty.tcp.hostname" -> host,
@@ -82,13 +85,15 @@ object SharderSetup {
     case Create(id) => hashToShard(id, numberOfShards)
   }
 
-  def apply(system: ActorSystem): ActorRef = {
+  def apply(system: ActorSystem, allocationStrategy: ShardAllocationStrategy): ActorRef = {
     ClusterSharding(system).start(
       typeName = "Conversation",
       entityProps = Props[Guardian],
       settings = ClusterShardingSettings(system),
       extractEntityId = entityExtractor,
-      extractShardId = shardExtractor)
+      extractShardId = shardExtractor,
+      allocationStrategy = allocationStrategy,
+      handOffStopMessage = PoisonPill)
   }
 
 }
