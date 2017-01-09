@@ -67,8 +67,8 @@ object SharderSetup {
   }
 
   private val shardExtractor: ShardRegion.ExtractShardId = {
-    case ConversationEnvelope(id, payload) => id
-    case Create(id) => id
+    case ConversationEnvelope(id, payload) => id // 1 to 1 mapping of shard to entity
+    case Create(id) => id // 1 to 1 mapping of shard to entity
   }
 
   def apply(system: ActorSystem, allocationStrategy: ShardAllocationStrategy): ActorRef = {
