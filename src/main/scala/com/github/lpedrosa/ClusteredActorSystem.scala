@@ -10,7 +10,6 @@ import akka.cluster.sharding.ClusterShardingSettings
 import akka.cluster.sharding.ShardCoordinator.ShardAllocationStrategy
 import akka.cluster.sharding.ShardRegion
 import com.typesafe.config.{Config, ConfigFactory}
-import org.slf4j.LoggerFactory
 
 case class ClusterConfig(systemName: String, host: String, port: Int) {
 
@@ -41,24 +40,17 @@ object ClusteredActorSystem {
 
 class ClusteredActorSystem(val system: ActorSystem, config: ClusterConfig) {
 
-  private val log = LoggerFactory.getLogger(classOf[ClusteredActorSystem])
-  private var cluster: Option[Cluster] = None
+  val cluster: Cluster = Cluster(system)
 
   def join(systemName: String = config.systemName, 
            host: String = config.host, 
            port: Int = config.port): ActorSystem = {
-    cluster = Some(Cluster(system))
-      
-    cluster.foreach(_.join(Address("akka.tcp", systemName, host, port)))
-
+    cluster.join(Address("akka.tcp", systemName, host, port))
     system
   }
 
   def leave(): ActorSystem = {
-    cluster match {
-      case Some(cluster) => cluster.leave(cluster.selfAddress)
-      case None => log.warn("Tried to leave a cluster without joining one first...")
-    }
+    cluster.leave(cluster.selfAddress)
     system
   }
 

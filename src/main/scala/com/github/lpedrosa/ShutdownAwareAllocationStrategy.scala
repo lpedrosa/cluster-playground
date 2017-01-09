@@ -21,7 +21,7 @@ trait BlacklistService {
 
 object ShutdownAwareAllocationStrategy {
 
-  def defaultWithBlacklist(system: ActorSystem, blacklistService: BlacklistService): ShutdownAwareAllocationStrategy = {
+  def apply(system: ActorSystem, blacklistService: BlacklistService): ShutdownAwareAllocationStrategy = {
     val settings = ClusterShardingSettings(system)
 
     // akka uses the LeastShardAllocationStrategy by default, we just want to decorate it
