@@ -1,6 +1,11 @@
 package com.github.lpedrosa
 
-import akka.actor.{Actor, ActorRef, ActorLogging, ActorSystem, Props}
+import akka.actor.Actor
+import akka.actor.ActorRef
+import akka.actor.ActorLogging
+import akka.actor.ActorSystem
+import akka.actor.Props
+import akka.actor.PoisonPill
 
 object Guardian {
 
@@ -21,7 +26,9 @@ class Guardian extends Actor with ActorLogging {
     case Create(id) =>
       val conversation = context.actorOf(Conversation.props(id))
       context.become(started(conversation))
-    case _ => sender ! NotInitialized
+    case _ =>
+      sender ! NotInitialized
+      self ! PoisonPill
   }
 
   def started(conversation: ActorRef): Receive = {

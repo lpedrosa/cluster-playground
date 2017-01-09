@@ -66,15 +66,9 @@ object SharderSetup {
     case m @ Create(id) => (id.toString, m)
   }
 
-  private def hashToShard(hash: String, numberOfShards: Int) = {
-    (hash.codePointAt(hash.length() - 1) % numberOfShards).toString
-  }
-
-  private val numberOfShards = 4
-
   private val shardExtractor: ShardRegion.ExtractShardId = {
-    case ConversationEnvelope(id, payload) => hashToShard(id, numberOfShards)
-    case Create(id) => hashToShard(id, numberOfShards)
+    case ConversationEnvelope(id, payload) => id
+    case Create(id) => id
   }
 
   def apply(system: ActorSystem, allocationStrategy: ShardAllocationStrategy): ActorRef = {

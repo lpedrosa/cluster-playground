@@ -1,9 +1,10 @@
 package com.github.lpedrosa
 
 import scala.collection.immutable
-import scala.concurrent.Future
+import scala.concurrent.{ExecutionContext, Future}
 
 import akka.actor.{ActorRef, ActorSystem}
+import akka.cluster.Cluster
 import akka.cluster.sharding.ClusterShardingSettings
 import akka.cluster.sharding.ShardCoordinator.LeastShardAllocationStrategy
 import akka.cluster.sharding.ShardCoordinator.ShardAllocationStrategy
@@ -17,11 +18,34 @@ import org.slf4j.LoggerFactory
  * e.g. These nodes would be updated during a graceful shutdown
  */
 trait BlacklistService {
+
+  def add(hostPort: String): Unit
+  def remove(hostPort: String): Unit
+  def listAll(): Future[immutable.Set[String]]
+
+}
+
+class InMemBlacklistService extends BlacklistService {
+
+  private val blacklist: scala.collection.mutable.Set[String] = scala.collection.mutable.Set.empty[String]
+
+  override def add(hostPort: String): Unit = {
+    blacklist += hostPort
+  }
+
+  override def remove(hostPort: String): Unit = {
+    blacklist -= hostPort
+  }
+
+  override def listAll(): Future[immutable.Set[String]] = {
+    Future.successful(blacklist.toSet)
+  }
+
 }
 
 object ShutdownAwareAllocationStrategy {
 
-  def apply(system: ActorSystem, blacklistService: BlacklistService): ShutdownAwareAllocationStrategy = {
+  def apply(system: ActorSystem, blacklistService: BlacklistService, ec: ExecutionContext): ShutdownAwareAllocationStrategy = {
     val settings = ClusterShardingSettings(system)
 
     // akka uses the LeastShardAllocationStrategy by default, we just want to decorate it
@@ -29,13 +53,17 @@ object ShutdownAwareAllocationStrategy {
       settings.tuningParameters.leastShardAllocationRebalanceThreshold,
       settings.tuningParameters.leastShardAllocationMaxSimultaneousRebalance)
 
-    new ShutdownAwareAllocationStrategy(delegate, blacklistService)
+    val selfAddress = Cluster(system).selfAddress.hostPort
+
+    new ShutdownAwareAllocationStrategy(selfAddress, delegate, blacklistService, ec)
   }
 
 }
 
-class ShutdownAwareAllocationStrategy(delegate: ShardAllocationStrategy, 
-                                      blacklistService: BlacklistService) extends ShardAllocationStrategy {
+class ShutdownAwareAllocationStrategy(selfAddress: String,
+                                      delegate: ShardAllocationStrategy, 
+                                      blacklistService: BlacklistService,
+                                      ec: ExecutionContext) extends ShardAllocationStrategy {
 
     private val log = LoggerFactory.getLogger(classOf[ShutdownAwareAllocationStrategy])
 
@@ -44,9 +72,13 @@ class ShutdownAwareAllocationStrategy(delegate: ShardAllocationStrategy,
       shardId: ShardId, 
       currentShardAllocations: Map[ActorRef, immutable.IndexedSeq[ShardId]]): Future[ActorRef] = {
 
+      log.info("currentShardAllocations: {}", currentShardAllocations)
       // filter out shards marked for shutdown
       val liveShardAllocations = filterShards(currentShardAllocations)
-      delegate.allocateShard(requester, shardId, currentShardAllocations)
+      liveShardAllocations.flatMap { liveShards => 
+        log.info("liveShards(filtered): {}", liveShards)
+        delegate.allocateShard(requester, shardId, liveShards)
+      }(ec)
     }
 
     override def rebalance(
@@ -58,7 +90,22 @@ class ShutdownAwareAllocationStrategy(delegate: ShardAllocationStrategy,
     }
 
     private def filterShards(currentShardAllocations: Map[ActorRef, immutable.IndexedSeq[ShardId]]) = {
-      currentShardAllocations.keysIterator.foreach(actor => log.info("Actor with shards: {}", actor.path.address.hostPort))
-      currentShardAllocations
+      val filteredShards = blacklistService.listAll().map { blacklist =>
+        currentShardAllocations.filter { case (k,v) =>
+          !blacklist.contains(toHostPort(k))
+        }
+      }(ec)
+      filteredShards
+    }
+
+    private def toHostPort(ref: ActorRef): String = {
+      val address = ref.path.address
+
+      val hostPort = address.port match {
+        case Some(port) => address.hostPort
+        case None => selfAddress
+      }
+
+      hostPort
     }
 }
